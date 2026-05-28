@@ -6,10 +6,19 @@
 
 $ErrorActionPreference = "Stop"
 
-$SrcFile  = Join-Path $PSScriptRoot "switch-jdk.ps1"
-$OutDir   = Join-Path $PSScriptRoot "dist"
+# 解析脚本所在目录（$PSScriptRoot 在部分启动方式下为空，依次回退）
+$ScriptDir = if ($PSScriptRoot -and $PSScriptRoot -ne "") {
+    $PSScriptRoot
+} elseif ($MyInvocation.MyCommand.Path -and $MyInvocation.MyCommand.Path -ne "") {
+    Split-Path -Parent $MyInvocation.MyCommand.Path
+} else {
+    "C:\switch-jdk"
+}
+
+$SrcFile  = Join-Path $ScriptDir "switch-jdk.ps1"
+$OutDir   = Join-Path $ScriptDir "dist"
 $OutFile  = Join-Path $OutDir "switch-jdk.exe"
-$IconFile = Join-Path $PSScriptRoot "icon.ico"
+$IconFile = Join-Path $ScriptDir "icon.ico"
 
 function Write-Step {
     param([string]$Msg)

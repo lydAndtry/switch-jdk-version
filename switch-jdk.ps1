@@ -4,8 +4,17 @@
 # 支持：本地缓存自定义扫描根目录
 # ============================================================
 
+# 解析脚本所在目录（$PSScriptRoot 在部分启动方式下为空，依次回退）
+$script:ScriptDir = if ($PSScriptRoot -and $PSScriptRoot -ne "") {
+    $PSScriptRoot
+} elseif ($MyInvocation.MyCommand.Path -and $MyInvocation.MyCommand.Path -ne "") {
+    Split-Path -Parent $MyInvocation.MyCommand.Path
+} else {
+    "C:\switch-jdk"
+}
+
 # 缓存文件与默认搜索根目录
-$script:CacheFile = Join-Path $PSScriptRoot "jdk-roots-cache.json"
+$script:CacheFile = Join-Path $script:ScriptDir "jdk-roots-cache.json"
 $script:DefaultRoots = @(
     "C:\Program Files\Java",
     "C:\Program Files (x86)\Java",
