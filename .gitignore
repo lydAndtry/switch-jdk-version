@@ -1,2 +1,5 @@
 # 本地缓存的自定义 JDK 扫描根目录，不纳入版本控制
 jdk-roots-cache.json
+
+# 打包输出目录
+dist/
