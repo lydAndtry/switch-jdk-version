@@ -4,17 +4,9 @@
 # 支持：本地缓存自定义扫描根目录
 # ============================================================
 
-# 解析脚本所在目录（$PSScriptRoot 在部分启动方式下为空，依次回退）
-$script:ScriptDir = if ($PSScriptRoot -and $PSScriptRoot -ne "") {
-    $PSScriptRoot
-} elseif ($MyInvocation.MyCommand.Path -and $MyInvocation.MyCommand.Path -ne "") {
-    Split-Path -Parent $MyInvocation.MyCommand.Path
-} else {
-    "C:\switch-jdk"
-}
-
-# 缓存文件与默认搜索根目录
-$script:CacheFile = Join-Path $script:ScriptDir "jdk-roots-cache.json"
+# 缓存目录固定使用 AppData\Roaming，不受脚本启动方式影响
+$script:CacheDir  = Join-Path ([Environment]::GetFolderPath('ApplicationData')) "switch-jdk"
+$script:CacheFile = Join-Path $script:CacheDir "jdk-roots-cache.json"
 $script:DefaultRoots = @(
     "C:\Program Files\Java",
     "C:\Program Files (x86)\Java",
@@ -71,7 +63,6 @@ function Find-JdkInstallations {
     return $found
 }
 
-# 精确判断：只匹配 JDK/JRE 的 bin 目录，不影响其他 PATH 条目
 function Test-IsJdkEntry {
     param([string]$Entry)
     $e = $Entry.TrimEnd('\')
@@ -86,11 +77,9 @@ function Update-SystemJdkPath {
     $newBin = Join-Path $NewJdkRoot "bin"
     $newJre = Join-Path $NewJdkRoot "jre\bin"
 
-    # 只操作 Machine 级别 PATH，User PATH 完全不碰
     $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
     $parts       = $machinePath -split ";" | Where-Object { $_ -ne "" }
 
-    # 找出旧 JDK 条目（精确匹配）
     $toRemove = $parts | Where-Object { Test-IsJdkEntry $_ }
     $cleaned  = $parts | Where-Object { -not (Test-IsJdkEntry $_) }
 
@@ -101,7 +90,6 @@ function Update-SystemJdkPath {
         Write-Log "PATH 中未发现旧 JDK 条目，直接追加新条目。" "INFO"
     }
 
-    # 新条目插在最前面
     $newEntries = @($newBin)
     if (Test-Path $newJre) { $newEntries += $newJre }
 
@@ -111,7 +99,6 @@ function Update-SystemJdkPath {
     [Environment]::SetEnvironmentVariable("Path", $newMachinePath, "Machine")
     Write-Log "系统 PATH(Machine) 已更新，其他条目未改动。" "SUCCESS"
 
-    # 会话 PATH = 新 Machine PATH + 原 User PATH（完整保留）
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
     if ($userPath) {
         $env:Path = "$newMachinePath;$userPath"
@@ -128,13 +115,14 @@ function Update-SystemJdkPath {
 function Read-CachedRoots {
     if (Test-Path $script:CacheFile) {
         try {
-            $json = Get-Content $script:CacheFile -Raw -Encoding UTF8
+            $json = [System.IO.File]::ReadAllText($script:CacheFile, [System.Text.Encoding]::UTF8)
             $obj  = $json | ConvertFrom-Json
-            if ($obj.customRoots -is [System.Array]) {
-                return [string[]]$obj.customRoots
-            }
+            $raw  = $obj.customRoots
+            if ($null -eq $raw) { return @() }
+            # ConvertFrom-Json 单条时返回 string，多条时返回 array，统一包成 string[]
+            return [string[]]@($raw)
         } catch {
-            Write-Log "读取缓存文件失败，将使用空列表。" "WARN"
+            Write-Log "读取缓存失败：$_" "WARN"
         }
     }
     return @()
@@ -142,9 +130,18 @@ function Read-CachedRoots {
 
 function Save-CachedRoots {
     param([string[]]$Roots)
-    $obj = @{ customRoots = $Roots }
-    $obj | ConvertTo-Json -Depth 3 | Set-Content $script:CacheFile -Encoding UTF8
-    Write-Log "扫描根目录已保存到缓存：$script:CacheFile" "SUCCESS"
+    try {
+        if (-not (Test-Path $script:CacheDir)) {
+            New-Item -ItemType Directory -Path $script:CacheDir -Force | Out-Null
+        }
+        # 强制数组包装，防止单条被序列化成裸字符串
+        $obj  = [ordered]@{ customRoots = @($Roots) }
+        $json = $obj | ConvertTo-Json -Depth 3
+        [System.IO.File]::WriteAllText($script:CacheFile, $json, [System.Text.Encoding]::UTF8)
+        Write-Log "已保存到：$script:CacheFile" "SUCCESS"
+    } catch {
+        Write-Log "保存缓存失败：$_" "ERROR"
+    }
 }
 
 function Get-AllSearchRoots {
@@ -165,13 +162,13 @@ function Show-ManageRootsMenu {
         $cached = Read-CachedRoots
 
         Write-Host ""
-        Write-Host "  【内置默认路径】（只读）" -ForegroundColor DarkGray
+        Write-Host "  [内置默认路径]（只读）" -ForegroundColor DarkGray
         foreach ($r in $script:DefaultRoots) {
-            Write-Host ("    {0}" -f $r) -ForegroundColor DarkGray
+            Write-Host ("    $r") -ForegroundColor DarkGray
         }
 
         Write-Host ""
-        Write-Host "  【自定义缓存路径】" -ForegroundColor White
+        Write-Host "  [自定义缓存路径]  缓存文件：$script:CacheFile" -ForegroundColor White
         if ($cached.Count -eq 0) {
             Write-Host "    (暂无自定义路径)" -ForegroundColor DarkGray
         } else {
@@ -201,10 +198,11 @@ function Show-ManageRootsMenu {
                     Write-Log "该路径已存在，无需重复添加。" "WARN"
                 } else {
                     if (-not (Test-Path $newPath)) {
-                        Write-Log "警告：该路径当前不存在，但仍会保存（目录将来可能创建）。" "WARN"
+                        Write-Log "警告：该路径当前不存在，但仍会保存。" "WARN"
                     }
-                    $cached += $newPath
-                    Save-CachedRoots -Roots $cached
+                    $newList = [System.Collections.Generic.List[string]]@($cached)
+                    $newList.Add($newPath)
+                    Save-CachedRoots -Roots $newList.ToArray()
                     Write-Log "已添加：$newPath" "SUCCESS"
                 }
                 Start-Sleep -Seconds 1
@@ -221,8 +219,9 @@ function Show-ManageRootsMenu {
                         $delIdx = [int]$delInput - 1
                         if ($delIdx -ge 0 -and $delIdx -lt $cached.Count) {
                             $removed = $cached[$delIdx]
-                            $cached  = $cached | Where-Object { $_ -ne $removed }
-                            Save-CachedRoots -Roots $cached
+                            $newList = [System.Collections.Generic.List[string]]@($cached)
+                            $newList.RemoveAt($delIdx)
+                            Save-CachedRoots -Roots $newList.ToArray()
                             Write-Log "已删除：$removed" "SUCCESS"
                         } else {
                             Write-Log "序号无效。" "ERROR"
@@ -247,10 +246,9 @@ function Show-ManageRootsMenu {
 function Start-SwitchJdk {
     Clear-Host
     Write-Separator
-    Write-Log "   JDK 路径切换工具  v1.2" "TITLE"
+    Write-Log "   JDK 路径切换工具  v1.3" "TITLE"
     Write-Separator
 
-    # 管理员权限检查
     if (-not (Test-Admin)) {
         Write-Log "未检测到管理员权限！修改系统 PATH 需要管理员身份运行。" "ERROR"
         Write-Log "请关闭此窗口，右键脚本选择 [以管理员身份运行 PowerShell]。" "WARN"
@@ -259,7 +257,6 @@ function Start-SwitchJdk {
     }
     Write-Log "已检测到管理员权限" "SUCCESS"
 
-    # 显示当前 JDK 相关路径
     Write-Separator
     Write-Log "当前系统 PATH 中的 Java 相关路径：" "INFO"
     $currentJdkPaths = Get-CurrentJdkPaths
@@ -269,13 +266,12 @@ function Start-SwitchJdk {
         $currentJdkPaths | ForEach-Object { Write-Log "  -> $_" "INFO" }
     }
 
-    # 扫描（默认 + 缓存根目录）
     Write-Separator
     $allRoots = Get-AllSearchRoots
     Write-Log "正在扫描以下根目录（共 $($allRoots.Count) 个）..." "INFO"
     foreach ($r in $allRoots) {
-        $flag = if (Test-Path $r) { "✓" } else { "✗" }
-        Write-Host ("    [{0}] {1}" -f $flag, $r) -ForegroundColor DarkGray
+        $flag = if (Test-Path $r) { "Y" } else { "N" }
+        Write-Host ("    [$flag] $r") -ForegroundColor DarkGray
     }
     Write-Host ""
 
@@ -290,7 +286,6 @@ function Start-SwitchJdk {
         Write-Log "未扫描到 JDK，请手动输入路径。" "WARN"
     }
 
-    # 用户选择
     Write-Separator
     Write-Host ""
     if ($jdkList.Count -gt 0) {
@@ -316,7 +311,6 @@ function Start-SwitchJdk {
         Write-Log "手动输入路径：$selectedJdk" "INFO"
     }
 
-    # 路径校验
     Write-Separator
     Write-Log "正在校验 JDK 路径..." "INFO"
 
@@ -342,12 +336,10 @@ function Start-SwitchJdk {
         Write-Log "未找到 javac.exe，可能是 JRE，继续设置..." "WARN"
     }
 
-    # 更新系统 PATH
     Write-Separator
     Write-Log "正在更新系统 PATH..." "INFO"
     $newBinPath = Update-SystemJdkPath -NewJdkRoot $selectedJdk
 
-    # 设置 JAVA_HOME
     Write-Log "正在设置 JAVA_HOME..." "INFO"
     $oldJavaHome = [Environment]::GetEnvironmentVariable("JAVA_HOME", "Machine")
     if ($oldJavaHome) {
@@ -357,7 +349,6 @@ function Start-SwitchJdk {
     $env:JAVA_HOME = $selectedJdk
     Write-Log "JAVA_HOME 已设置为：$selectedJdk" "SUCCESS"
 
-    # 验证 java -version
     Write-Separator
     Write-Log "正在验证，执行 java -version..." "INFO"
     Write-Host ""
@@ -371,7 +362,6 @@ function Start-SwitchJdk {
         Write-Log "执行 java -version 时出错：$_" "ERROR"
     }
 
-    # 确认更新后的 PATH Java 条目
     Write-Separator
     Write-Log "更新后系统 PATH 中的 Java 相关路径：" "INFO"
     $updatedPaths = [Environment]::GetEnvironmentVariable("Path", "Machine") -split ";" |
@@ -395,13 +385,13 @@ function Start-SwitchJdk {
 while ($true) {
     Clear-Host
     Write-Separator
-    Write-Log "   JDK 路径切换工具  v1.2" "TITLE"
+    Write-Log "   JDK 路径切换工具  v1.3" "TITLE"
     Write-Separator
     Write-Host ""
 
     $cached = Read-CachedRoots
     $totalRoots = $script:DefaultRoots.Count + $cached.Count
-    Write-Host ("  当前扫描根目录：内置 {0} 个 + 自定义 {1} 个 = 共 {2} 个" -f `
+    Write-Host ("  扫描根目录：内置 {0} 个 + 自定义 {1} 个 = 共 {2} 个" -f `
         $script:DefaultRoots.Count, $cached.Count, $totalRoots) -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "  [1] 管理扫描根目录（添加 / 删除自定义路径）" -ForegroundColor Green
