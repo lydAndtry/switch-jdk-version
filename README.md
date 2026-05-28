@@ -1,6 +1,4 @@
-﻿<div align="center">
-<h1>JDK 版本一键切换工具</h1>
-</div>
+﻿<h1 align="center">JDK 版本一键切换工具</h1>
 
 ---
 
