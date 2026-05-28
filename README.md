@@ -47,7 +47,7 @@
 
 启动后显示主菜单，提示当前内置扫描根目录数量和自定义数量。
 
-![step1](pictures/step1%20start.png)
+![step1-start](pictures/step1-start.png)
 
 选择操作：
 - 输入 `1` — 进入扫描根目录管理
@@ -60,7 +60,7 @@
 
 进入后可查看内置默认路径（只读）和当前已缓存的自定义路径。
 
-![step2](pictures/step2%20manager%20root%20path.png)
+![step2-manager-root-path](pictures/step2-manager-root-path.png)
 
 操作说明：
 
@@ -76,7 +76,7 @@
 
 输入 `A` 后，粘贴或输入你的 JDK 安装根目录（不是 JDK 本身，而是存放多个 JDK 的父目录）。
 
-![step3](pictures/step3%20save%20your%20path.png)
+![step3-save-your-path](pictures/step3-save-your-path.png)
 
 例如你的 JDK 安装在 `E:\Holdwell\devEnv\java\jdk8`，则添加 `E:\Holdwell\devEnv\java`。
 
@@ -88,7 +88,7 @@
 
 在主菜单选择 `2`，脚本扫描所有根目录（内置 + 自定义），列出发现的所有 JDK。
 
-![step4](pictures/step4%20choose%20your%20version.png)
+![step4-choose-your-version](pictures/step4-choose-your-version.png)
 
 - `[Y]` 表示该根目录存在，`[N]` 表示不存在（跳过）
 - 输入序号选择对应 JDK，或直接粘贴完整 JDK 根目录路径
