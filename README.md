@@ -1,4 +1,6 @@
-﻿# JDK 版本一键切换工具
+﻿<div align="center">
+<h1>JDK 版本一键切换工具</h1>
+</div>
 
 在 Windows 系统上快速切换 JDK 版本，自动扫描已安装的 JDK、更新系统 PATH 和 JAVA_HOME，无需手动操作环境变量。
 

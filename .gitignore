@@ -3,3 +3,4 @@ jdk-roots-cache.json
 
 # 打包输出目录
 dist/
+/.idea/
