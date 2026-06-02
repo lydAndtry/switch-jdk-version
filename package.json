@@ -1,0 +1,51 @@
+{
+  "name": "switch-jdk-version",
+  "version": "1.4.0",
+  "description": "JDK 版本一键切换工具 — 快速切换 JDK 版本，自动更新 PATH 和 JAVA_HOME，支持 Windows / macOS / Linux",
+  "keywords": [
+    "jdk",
+    "java",
+    "jdk-switch",
+    "java-home",
+    "jdk-version",
+    "switch-jdk",
+    "windows",
+    "macos",
+    "linux",
+    "cross-platform",
+    "cli"
+  ],
+  "homepage": "https://github.com/holdwell/switch-jdk-version",
+  "bugs": {
+    "url": "https://github.com/holdwell/switch-jdk-version/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/holdwell/switch-jdk-version.git"
+  },
+  "license": "Apache-2.0",
+  "author": "holdwell",
+  "main": "./bin/switch-jdk.js",
+  "bin": {
+    "switch-jdk": "./bin/switch-jdk.js"
+  },
+  "files": [
+    "bin/",
+    "scripts/",
+    "README.md",
+    "LICENSE"
+  ],
+  "preferGlobal": true,
+  "os": [
+    "win32",
+    "darwin",
+    "linux"
+  ],
+  "engines": {
+    "node": ">=12.0.0"
+  },
+  "dependencies": {},
+  "scripts": {
+    "test": "echo \"手动验证: 在当前平台执行 switch-jdk 命令，确认交互式菜单正常启动\" && exit 0"
+  }
+}

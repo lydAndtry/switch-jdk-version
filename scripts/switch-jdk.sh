@@ -3,7 +3,7 @@
 # JDK 路径一键切换脚本 (macOS / Linux)
 # 支持：扫描已安装JDK、手动输入路径、自动更新 JAVA_HOME 和 PATH
 # 支持：本地缓存自定义扫描根目录
-# 版本：v1.3
+# 版本：v1.4
 # ============================================================
 
 # 缓存目录：统一存放于 ~/.config/switch-jdk/
@@ -36,6 +36,34 @@ detect_os() {
 }
 
 OS=$(detect_os)
+
+# ════ 路径工具函数 ══════════════════════════════════════════════
+
+# 规范化路径：去除首尾空白、引号、尾随斜杠
+normalize_path() {
+    local p="$1"
+    # 去除首尾空白
+    p=$(echo "$p" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    # 去除首尾引号
+    p="${p#\"}"; p="${p%\"}"
+    p="${p#\'}"; p="${p%\'}"
+    # 去除尾随斜杠（保留根路径 /）
+    while [[ "$p" != "/" && ( "$p" == */ || "$p" == *\\ ) ]]; do
+        p="${p%/}"
+        p="${p%\\}"
+    done
+    echo "$p"
+}
+
+# 检查路径是否存在（双重检查：-d + ls）
+test_path_safe() {
+    local p="$1"
+    [ -z "$p" ] && return 1
+    [ -d "$p" ] && return 0
+    # Fallback: 尝试 ls（有时能处理 -d 无法处理的情况）
+    ls "$p" >/dev/null 2>&1 && return 0
+    return 1
+}
 
 # ════ 默认扫描根目录（按 OS 区分）════════════════════════════
 get_default_roots() {
@@ -119,13 +147,21 @@ _macos_java_home_list() {
 read_cached_roots() {
     [ -f "$CACHE_FILE" ] || return
     while IFS= read -r line; do
-        [[ -n "$line" && "$line" != \#* ]] && echo "$line"
+        [[ -n "$line" && "$line" != \#* ]] && normalize_path "$line"
     done < "$CACHE_FILE"
 }
 
 save_cached_roots() {
     mkdir -p "$CACHE_DIR"
-    printf '%s\n' "$@" > "$CACHE_FILE"
+    # 规范化所有路径后再保存
+    local normalized=()
+    local p
+    for p in "$@"; do
+        p=$(normalize_path "$p")
+        [ -n "$p" ] && normalized+=("$p")
+    done
+    # 去重
+    printf '%s\n' "${normalized[@]}" | awk '!seen[$0]++' > "$CACHE_FILE"
     log_success "已保存到：$CACHE_FILE"
 }
 
@@ -249,7 +285,7 @@ show_manage_roots_menu() {
         else
             for i in "${!cached[@]}"; do
                 local exists_flag=""
-                [ ! -d "${cached[$i]}" ] && exists_flag=" ${RED}[路径不存在]${NC}"
+                test_path_safe "${cached[$i]}" || exists_flag=" ${RED}[路径不存在]${NC}"
                 echo -e "    [$((i+1))] ${cached[$i]}${exists_flag}"
             done
         fi
@@ -267,22 +303,33 @@ show_manage_roots_menu() {
         case "$action" in
             A)
                 echo ""
-                echo -e "${YELLOW}请输入要添加的扫描根目录路径（如 /opt/java）：${NC}"
-                read -rp ">>> " new_path
-                new_path="${new_path//\"/}"
-                new_path="${new_path#"${new_path%%[![:space:]]*}"}"
-                new_path="${new_path%"${new_path##*[![:space:]]}"}"
+                echo -e "${YELLOW}请输入要添加的扫描根目录路径（如 /opt/java）。输入 Q 取消：${NC}"
+                while true; do
+                    read -rp ">>> " new_path
+                    new_path=$(normalize_path "$new_path")
 
-                if [ -z "$new_path" ]; then
-                    log_warn "输入为空，已取消。"
-                elif printf '%s\n' "${cached[@]}" | grep -qx "$new_path"; then
-                    log_warn "该路径已存在，无需重复添加。"
-                else
-                    [ ! -d "$new_path" ] && log_warn "警告：该路径当前不存在，但仍会保存。"
+                    if [ -z "$new_path" ]; then
+                        log_warn "输入为空，已取消。"
+                        break
+                    fi
+                    if [ "$(echo "$new_path" | tr '[:lower:]' '[:upper:]')" = "Q" ]; then
+                        log_info "已取消添加。"
+                        break
+                    fi
+                    if printf '%s\n' "${cached[@]}" | grep -qx "$new_path"; then
+                        log_warn "该路径已存在，无需重复添加。"
+                        break
+                    fi
+                    if ! test_path_safe "$new_path"; then
+                        log_error "路径不存在：$new_path，请重新输入。"
+                        continue
+                    fi
+
                     cached+=("$new_path")
                     save_cached_roots "${cached[@]}"
                     log_success "已添加：$new_path"
-                fi
+                    break
+                done
                 sleep 1
                 ;;
             D)
@@ -323,7 +370,7 @@ show_manage_roots_menu() {
 start_switch_jdk() {
     clear
     separator
-    log_title "   JDK 路径切换工具  v1.3  [$OS]"
+    log_title "   JDK 路径切换工具  v1.4  [$OS]"
     separator
 
     separator
@@ -378,52 +425,64 @@ start_switch_jdk() {
     separator
     echo ""
     if [ ${#jdk_list[@]} -gt 0 ]; then
-        echo -e "${YELLOW}输入序号选择上方 JDK，或直接粘贴完整 JDK 根目录路径：${NC}"
+        echo -e "${YELLOW}输入序号选择上方 JDK，或直接粘贴完整 JDK 根目录路径（输入 Q 返回）：${NC}"
     else
-        echo -e "${YELLOW}请输入完整 JDK 根目录路径（例如 /usr/lib/jvm/java-17-openjdk-amd64）：${NC}"
+        echo -e "${YELLOW}请输入完整 JDK 根目录路径（例如 /usr/lib/jvm/java-17-openjdk-amd64）（输入 Q 返回）：${NC}"
     fi
-    read -rp ">>> " user_input
 
     local selected_jdk=""
-    if [[ "$user_input" =~ ^[0-9]+$ ]]; then
-        local idx=$((user_input - 1))
-        if [ "$idx" -ge 0 ] && [ "$idx" -lt ${#jdk_list[@]} ]; then
-            selected_jdk="${jdk_list[$idx]}"
-            log_info "已选择：$selected_jdk"
-        else
-            log_error "序号无效，请重新运行脚本。"
-            read -rp "按 Enter 返回"
+    while true; do
+        read -rp ">>> " user_input
+        user_input="$(echo "$user_input" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+
+        if [ -z "$user_input" ]; then
+            log_error "输入为空，请重新输入。"
+            continue
+        fi
+        if [ "$(echo "$user_input" | tr '[:lower:]' '[:upper:]')" = "Q" ]; then
             return
         fi
-    else
-        selected_jdk="${user_input//\"/}"
-        selected_jdk="${selected_jdk#"${selected_jdk%%[![:space:]]*}"}"
-        selected_jdk="${selected_jdk%"${selected_jdk##*[![:space:]]}"}"
-        log_info "手动输入路径：$selected_jdk"
-    fi
 
-    separator
-    log_info "正在校验 JDK 路径..."
+        if [[ "$user_input" =~ ^[0-9]+$ ]]; then
+            local idx=$((user_input - 1))
+            if [ "$idx" -ge 0 ] && [ "$idx" -lt ${#jdk_list[@]} ]; then
+                selected_jdk="${jdk_list[$idx]}"
+                log_info "已选择：$selected_jdk"
+            else
+                log_error "序号无效，请重新输入。"
+                continue
+            fi
+        else
+            selected_jdk="${user_input//\"/}"
+            selected_jdk="${selected_jdk#"${selected_jdk%%[![:space:]]*}"}"
+            selected_jdk="${selected_jdk%"${selected_jdk##*[![:space:]]}"}"
+            selected_jdk=$(normalize_path "$selected_jdk")
+            log_info "手动输入路径：$selected_jdk"
+        fi
 
-    if [ ! -d "$selected_jdk" ]; then
-        log_error "路径不存在：$selected_jdk"
-        read -rp "按 Enter 返回"
-        return
-    fi
-    log_success "目录存在：$selected_jdk"
+        separator
+        log_info "正在校验 JDK 路径..."
 
-    if [ ! -x "$selected_jdk/bin/java" ]; then
-        log_error "bin/java 不存在，请确认输入的是 JDK 根目录。"
-        read -rp "按 Enter 返回"
-        return
-    fi
-    log_success "java 可执行文件存在：$selected_jdk/bin/java"
+        if [ ! -d "$selected_jdk" ]; then
+            log_error "路径不存在：$selected_jdk，请重新输入。"
+            continue
+        fi
+        log_success "目录存在：$selected_jdk"
 
-    if [ -x "$selected_jdk/bin/javac" ]; then
-        log_success "javac 存在，确认为完整 JDK。"
-    else
-        log_warn "未找到 javac，可能是 JRE，继续设置..."
-    fi
+        if [ ! -x "$selected_jdk/bin/java" ]; then
+            log_error "bin/java 不存在，请确认输入的是 JDK 根目录（不是 bin）。"
+            continue
+        fi
+        log_success "java 可执行文件存在：$selected_jdk/bin/java"
+
+        if [ -x "$selected_jdk/bin/javac" ]; then
+            log_success "javac 存在，确认为完整 JDK。"
+        else
+            log_warn "未找到 javac，可能是 JRE，继续设置..."
+        fi
+
+        break
+    done
 
     separator
     log_info "正在更新 JAVA_HOME 和系统 PATH..."

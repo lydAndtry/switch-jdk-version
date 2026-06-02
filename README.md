@@ -4,6 +4,20 @@
 
 快速切换 JDK 版本，自动扫描已安装的 JDK、更新系统 PATH 和 JAVA_HOME，无需手动操作环境变量。**支持 Windows、macOS、Linux 三平台。**
 
+## 快速安装（推荐）
+
+```bash
+npm install -g switch-jdk-version
+```
+
+安装完成后，在终端输入 `switch-jdk` 即可使用。
+
+> **需要管理员/sudo 权限** — 切换 JDK 时会修改系统环境变量，Windows 需要以管理员身份运行终端，macOS/Linux 会在需要时请求 sudo。
+
+---
+
+## 文件说明
+
 ## 功能特性
 
 - **主菜单交互** — 启动后进入主菜单，选择管理扫描路径或直接切换 JDK
@@ -20,12 +34,15 @@
 
 | 文件 | 平台 | 作用 |
 |------|------|------|
-| `switch-jdk.bat` | Windows | 启动器，自动申请管理员权限并调用 PowerShell 脚本 |
-| `switch-jdk.ps1` | Windows | 主脚本，负责扫描、选择、更新 PATH 和 JAVA_HOME |
+| `package.json` | 全平台 | npm 包配置，定义 CLI 命令 `switch-jdk` |
+| `bin/switch-jdk.js` | 全平台 | Node.js CLI 入口，检测 OS 并委托执行对应脚本 |
+| `scripts/switch-jdk.ps1` | Windows | 主脚本，负责扫描、选择、更新 PATH 和 JAVA_HOME |
+| `scripts/switch-jdk.sh` | macOS / Linux | 主脚本，功能与 Windows 版完全对等 |
+| `switch-jdk.bat` | Windows | 启动器，自动申请管理员权限并调用 PowerShell 脚本（双击运行方式） |
 | `build.ps1` | Windows | 打包脚本，将 ps1 编译为可双击运行的 exe |
-| `switch-jdk.sh` | macOS / Linux | 主脚本，功能与 Windows 版完全对等 |
 | `build-unix.sh` | macOS / Linux | 打包脚本，支持 shc 编译为二进制或打包为 tar.gz |
 | `icon.ico` | Windows | 程序图标（编译 exe 时嵌入） |
+| `DEPLOY.md` | — | npm 发布部署指南 |
 
 > **Windows** 缓存文件：`%APPDATA%\switch-jdk\jdk-roots-cache.json`
 > **macOS/Linux** 缓存文件：`~/.config/switch-jdk/custom-roots.txt`
@@ -34,11 +51,23 @@
 
 ## Windows 使用方式
 
-### 方式一：直接运行脚本
+### 方式一：npm 全局安装（推荐）
+
+```powershell
+npm install -g switch-jdk-version
+```
+
+安装后在 **管理员身份运行的** PowerShell 或 CMD 中输入：
+
+```powershell
+switch-jdk
+```
+
+### 方式二：直接运行脚本
 
 右键 `switch-jdk.bat`，选择 **"以管理员身份运行"**（脚本也会自动请求提权）。
 
-### 方式二：编译为 EXE 运行
+### 方式三：编译为 EXE 运行
 
 ```powershell
 # 以管理员身份在 PowerShell 中执行
@@ -51,15 +80,27 @@
 
 ## macOS 使用方式
 
-### 方式一：直接运行脚本
+### 方式一：npm 全局安装（推荐）
 
 ```bash
-bash switch-jdk.sh
+npm install -g switch-jdk-version
+```
+
+安装后直接输入：
+
+```bash
+switch-jdk
+```
+
+### 方式二：直接运行脚本
+
+```bash
+bash scripts/switch-jdk.sh
 ```
 
 切换 JDK 时会请求 `sudo` 权限（用于写入 `/etc/profile.d/switch-jdk.sh`），同时也会更新 `~/.zshrc` 或 `~/.bashrc`。
 
-### 方式二：打包为可执行文件
+### 方式三：打包为可执行文件
 
 ```bash
 # 安装 shc（可选，用于编译为二进制）
@@ -87,13 +128,25 @@ bash build-unix.sh
 
 ## Linux 使用方式
 
-### 方式一：直接运行脚本
+### 方式一：npm 全局安装（推荐）
 
 ```bash
-bash switch-jdk.sh
+npm install -g switch-jdk-version
 ```
 
-### 方式二：打包为可执行文件
+安装后直接输入：
+
+```bash
+switch-jdk
+```
+
+### 方式二：直接运行脚本
+
+```bash
+bash scripts/switch-jdk.sh
+```
+
+### 方式三：打包为可执行文件
 
 ```bash
 # 安装 shc（可选）

@@ -49,12 +49,12 @@ function Find-JdkInstallations {
     param([string[]]$SearchRoots)
     $found = @()
     foreach ($root in $SearchRoots) {
-        if (Test-Path $root) {
+        if (Test-PathSafe $root) {
             $dirs = Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue |
                     Where-Object { $_.Name -imatch "^jdk" }
             foreach ($d in $dirs) {
                 $binPath = Join-Path $d.FullName "bin"
-                if (Test-Path (Join-Path $binPath "java.exe")) {
+                if (Test-PathSafe (Join-Path $binPath "java.exe")) {
                     $found += $d.FullName
                 }
             }
@@ -69,6 +69,35 @@ function Test-IsJdkEntry {
     return ($e -imatch '\\jdk[^\\]*\\bin$') -or
            ($e -imatch '\\jdk[^\\]*\\jre\\bin$') -or
            ($e -imatch '\\jre[^\\]*\\bin$')
+}
+
+# 规范化路径：去除首尾空白/引号/尾随反斜杠，解析为绝对路径
+function Normalize-Path {
+    param([string]$RawPath)
+    if ([string]::IsNullOrWhiteSpace($RawPath)) { return "" }
+    # 去除首尾空白、引号、尾随反斜杠
+    $p = $RawPath.Trim().Trim('"').TrimEnd('\').TrimEnd('/')
+    if ($p -eq "") { return "" }
+    # 如果路径存在，解析为规范绝对路径；否则使用 GetFullPath
+    try {
+        if (Test-Path -LiteralPath $p) {
+            return (Resolve-Path -LiteralPath $p).Path
+        }
+    } catch { }
+    try {
+        return [System.IO.Path]::GetFullPath($p)
+    } catch {
+        return $p
+    }
+}
+
+# 检查路径是否存在（-LiteralPath 避免 [] 等被当作通配符；双重检查 Test-Path + .NET）
+function Test-PathSafe {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    $p = [System.Environment]::ExpandEnvironmentVariables($Path.Trim())
+    if (Test-Path -LiteralPath $p) { return $true }
+    try { return [System.IO.Directory]::Exists($p) } catch { return $false }
 }
 
 function Update-SystemJdkPath {
@@ -119,8 +148,24 @@ function Read-CachedRoots {
             $obj  = $json | ConvertFrom-Json
             $raw  = $obj.customRoots
             if ($null -eq $raw) { return @() }
-            # ConvertFrom-Json 单条时返回 string，多条时返回 array，统一包成 string[]
-            return [string[]]@($raw)
+            # ConvertFrom-Json 仅一条时返回 string，多条时返回 array；@($raw) 统一为列表
+            # 注意：不要用 `return ,$arr` 这种“包一层”的写法，否则会把 string[] 变成 object[]{string[]}，
+            # 显示时会出现 System.String[] 之类的异常。
+            $rawList = @($raw)
+            $paths = @(
+                $rawList |
+                    ForEach-Object { Normalize-Path $_ } |
+                    Where-Object { $_ -ne "" } |
+                    # 过滤历史异常：曾被错误写入为 "System.String[]"（或其被 GetFullPath 拼成的绝对路径）
+                    Where-Object { $_ -notmatch '(^|\\)System\.String\[\]$' }
+            )
+
+            # 若发现异常条目，自动清理缓存文件，避免 UI 再次显示脏数据
+            if ($paths.Count -ne $rawList.Count) {
+                Write-Log "检测到异常缓存项，已自动清理。" "WARN"
+                Save-CachedRoots -Roots ([string[]]$paths)
+            }
+            return [string[]]$paths
         } catch {
             Write-Log "读取缓存失败：$_" "WARN"
         }
@@ -134,8 +179,13 @@ function Save-CachedRoots {
         if (-not (Test-Path $script:CacheDir)) {
             New-Item -ItemType Directory -Path $script:CacheDir -Force | Out-Null
         }
-        # 强制数组包装，防止单条被序列化成裸字符串
-        $obj  = [ordered]@{ customRoots = @($Roots) }
+        # 规范化所有路径后再保存，确保缓存格式一致
+        $normalized = $Roots |
+            ForEach-Object { Normalize-Path $_ } |
+            Where-Object { $_ -ne "" } |
+            Where-Object { $_ -notmatch '(^|\\)System\.String\[\]$' } |
+            Select-Object -Unique
+        $obj  = [ordered]@{ customRoots = @($normalized) }
         $json = $obj | ConvertTo-Json -Depth 3
         [System.IO.File]::WriteAllText($script:CacheFile, $json, [System.Text.Encoding]::UTF8)
         Write-Log "已保存到：$script:CacheFile" "SUCCESS"
@@ -145,7 +195,7 @@ function Save-CachedRoots {
 }
 
 function Get-AllSearchRoots {
-    $cached = Read-CachedRoots
+    $cached = @(Read-CachedRoots)
     $all    = $script:DefaultRoots + $cached | Select-Object -Unique
     return [string[]]$all
 }
@@ -159,7 +209,7 @@ function Show-ManageRootsMenu {
         Write-Log "   管理扫描根目录" "TITLE"
         Write-Separator
 
-        $cached = Read-CachedRoots
+        $cached = @(Read-CachedRoots)
 
         Write-Host ""
         Write-Host "  [内置默认路径]（只读）" -ForegroundColor DarkGray
@@ -173,7 +223,7 @@ function Show-ManageRootsMenu {
             Write-Host "    (暂无自定义路径)" -ForegroundColor DarkGray
         } else {
             for ($i = 0; $i -lt $cached.Count; $i++) {
-                $exists = if (Test-Path $cached[$i]) { "" } else { " [路径不存在]" }
+                $exists = if (Test-PathSafe $cached[$i]) { "" } else { " [路径不存在]" }
                 Write-Host ("    [{0}] {1}{2}" -f ($i + 1), $cached[$i], $exists) -ForegroundColor White
             }
         }
@@ -190,20 +240,37 @@ function Show-ManageRootsMenu {
         switch ($action) {
             "A" {
                 Write-Host ""
-                Write-Host "请输入要添加的扫描根目录路径（如 F:\Java）：" -ForegroundColor Yellow
-                $newPath = (Read-Host ">>> ").Trim().Trim('"')
-                if ($newPath -eq "") {
-                    Write-Log "输入为空，已取消。" "WARN"
-                } elseif ($cached -contains $newPath -or $script:DefaultRoots -contains $newPath) {
-                    Write-Log "该路径已存在，无需重复添加。" "WARN"
-                } else {
-                    if (-not (Test-Path $newPath)) {
-                        Write-Log "警告：该路径当前不存在，但仍会保存。" "WARN"
+                Write-Host "请输入要添加的扫描根目录路径（如 F:\Java）。输入 Q 取消：" -ForegroundColor Yellow
+                while ($true) {
+                    $rawInput = (Read-Host ">>> ").Trim()
+                    if ($rawInput -eq "") {
+                        Write-Log "输入为空，已取消。" "WARN"
+                        break
                     }
+                    if ($rawInput.Trim().ToUpper() -eq "Q") {
+                        Write-Log "已取消添加。" "INFO"
+                        break
+                    }
+
+                    $newPath = Normalize-Path $rawInput
+                    if ($newPath -eq "") {
+                        Write-Log "输入为空，已取消。" "WARN"
+                        break
+                    }
+                    if (($cached -contains $newPath) -or ($script:DefaultRoots -contains $newPath)) {
+                        Write-Log "该路径已存在，无需重复添加。" "WARN"
+                        break
+                    }
+                    if (-not (Test-PathSafe $newPath)) {
+                        Write-Log "路径不存在：$newPath，请重新输入。" "ERROR"
+                        continue
+                    }
+
                     $newList = [System.Collections.Generic.List[string]]@($cached)
                     $newList.Add($newPath)
                     Save-CachedRoots -Roots $newList.ToArray()
                     Write-Log "已添加：$newPath" "SUCCESS"
+                    break
                 }
                 Start-Sleep -Seconds 1
             }
@@ -246,7 +313,7 @@ function Show-ManageRootsMenu {
 function Start-SwitchJdk {
     Clear-Host
     Write-Separator
-    Write-Log "   JDK 路径切换工具  v1.3" "TITLE"
+    Write-Log "   JDK 路径切换工具  v1.4" "TITLE"
     Write-Separator
 
     if (-not (Test-Admin)) {
@@ -270,7 +337,7 @@ function Start-SwitchJdk {
     $allRoots = Get-AllSearchRoots
     Write-Log "正在扫描以下根目录（共 $($allRoots.Count) 个）..." "INFO"
     foreach ($r in $allRoots) {
-        $flag = if (Test-Path $r) { "Y" } else { "N" }
+        $flag = if (Test-PathSafe $r) { "Y" } else { "N" }
         Write-Host ("    [$flag] $r") -ForegroundColor DarkGray
     }
     Write-Host ""
@@ -289,51 +356,60 @@ function Start-SwitchJdk {
     Write-Separator
     Write-Host ""
     if ($jdkList.Count -gt 0) {
-        Write-Host "输入序号选择上方 JDK，或直接粘贴完整 JDK 根目录路径：" -ForegroundColor Yellow
+        Write-Host "输入序号选择上方 JDK，或直接粘贴完整 JDK 根目录路径（输入 Q 返回）：" -ForegroundColor Yellow
     } else {
-        Write-Host "请输入完整 JDK 根目录路径（例如 D:\ProgramFiles\Java\jdk1.8.0_131）：" -ForegroundColor Yellow
+        Write-Host "请输入完整 JDK 根目录路径（例如 D:\ProgramFiles\Java\jdk1.8.0_131）（输入 Q 返回）：" -ForegroundColor Yellow
     }
-    $userInput = Read-Host ">>> "
 
     $selectedJdk = ""
-    if ($userInput -match "^\d+$") {
-        $idx = [int]$userInput - 1
-        if ($idx -ge 0 -and $idx -lt $jdkList.Count) {
-            $selectedJdk = $jdkList[$idx]
-            Write-Log "已选择：$selectedJdk" "INFO"
-        } else {
-            Write-Log "序号无效，请重新运行脚本。" "ERROR"
-            Read-Host "按 Enter 返回"
+    while ($true) {
+        $userInput = (Read-Host ">>> ").Trim()
+        if ($userInput -eq "") {
+            Write-Log "输入为空，请重新输入。" "ERROR"
+            continue
+        }
+        if ($userInput.ToUpper() -eq "Q") {
             return
         }
-    } else {
-        $selectedJdk = $userInput.Trim().Trim('"')
-        Write-Log "手动输入路径：$selectedJdk" "INFO"
-    }
 
-    Write-Separator
-    Write-Log "正在校验 JDK 路径..." "INFO"
+        if ($userInput -match "^\d+$") {
+            $idx = [int]$userInput - 1
+            if ($idx -ge 0 -and $idx -lt $jdkList.Count) {
+                $selectedJdk = $jdkList[$idx]
+                Write-Log "已选择：$selectedJdk" "INFO"
+            } else {
+                Write-Log "序号无效，请重新输入。" "ERROR"
+                continue
+            }
+        } else {
+            $selectedJdk = Normalize-Path $userInput
+            Write-Log "手动输入路径：$selectedJdk" "INFO"
+        }
 
-    if (-not (Test-Path $selectedJdk)) {
-        Write-Log "路径不存在：$selectedJdk" "ERROR"
-        Read-Host "按 Enter 返回"
-        return
-    }
-    Write-Log "目录存在：$selectedJdk" "SUCCESS"
+        Write-Separator
+        Write-Log "正在校验 JDK 路径..." "INFO"
 
-    $javaBin = Join-Path $selectedJdk "bin\java.exe"
-    if (-not (Test-Path $javaBin)) {
-        Write-Log "bin\java.exe 不存在，请确认输入的是 JDK 根目录。" "ERROR"
-        Read-Host "按 Enter 返回"
-        return
-    }
-    Write-Log "java.exe 存在：$javaBin" "SUCCESS"
+        if (-not (Test-PathSafe $selectedJdk)) {
+            Write-Log "路径不存在：$selectedJdk，请重新输入。" "ERROR"
+            continue
+        }
+        Write-Log "目录存在：$selectedJdk" "SUCCESS"
 
-    $javacBin = Join-Path $selectedJdk "bin\javac.exe"
-    if (Test-Path $javacBin) {
-        Write-Log "javac.exe 存在，确认为完整 JDK。" "SUCCESS"
-    } else {
-        Write-Log "未找到 javac.exe，可能是 JRE，继续设置..." "WARN"
+        $javaBin = Join-Path $selectedJdk "bin\java.exe"
+        if (-not (Test-Path -LiteralPath $javaBin)) {
+            Write-Log "bin\java.exe 不存在，请确认输入的是 JDK 根目录（不是 bin）。" "ERROR"
+            continue
+        }
+        Write-Log "java.exe 存在：$javaBin" "SUCCESS"
+
+        $javacBin = Join-Path $selectedJdk "bin\javac.exe"
+        if (Test-Path -LiteralPath $javacBin) {
+            Write-Log "javac.exe 存在，确认为完整 JDK。" "SUCCESS"
+        } else {
+            Write-Log "未找到 javac.exe，可能是 JRE，继续设置..." "WARN"
+        }
+
+        break
     }
 
     Write-Separator
@@ -389,7 +465,7 @@ while ($true) {
     Write-Separator
     Write-Host ""
 
-    $cached = Read-CachedRoots
+    $cached = @(Read-CachedRoots)
     $totalRoots = $script:DefaultRoots.Count + $cached.Count
     Write-Host ("  扫描根目录：内置 {0} 个 + 自定义 {1} 个 = 共 {2} 个" -f `
         $script:DefaultRoots.Count, $cached.Count, $totalRoots) -ForegroundColor DarkGray

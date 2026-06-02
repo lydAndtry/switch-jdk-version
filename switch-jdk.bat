@@ -10,7 +10,7 @@ if %errorLevel% neq 0 (
 )
 
 set "SCRIPT_DIR=%~dp0"
-set "PS_SCRIPT=%SCRIPT_DIR%switch-jdk.ps1"
+set "PS_SCRIPT=%SCRIPT_DIR%scripts\switch-jdk.ps1"
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%"
 
