@@ -15,16 +15,16 @@
     "cross-platform",
     "cli"
   ],
-  "homepage": "https://github.com/holdwell/switch-jdk-version",
+  "homepage": "https://github.com/lydAndtry/switch-jdk-version",
   "bugs": {
-    "url": "https://github.com/holdwell/switch-jdk-version/issues"
+    "url": "https://github.com/lydAndtry/switch-jdk-version.git/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/holdwell/switch-jdk-version.git"
+    "url": "https://github.com/lydAndtry/switch-jdk-version.git"
   },
   "license": "Apache-2.0",
-  "author": "holdwell",
+  "author": "liyongde",
   "main": "./bin/switch-jdk.js",
   "bin": {
     "switch-jdk": "./bin/switch-jdk.js"

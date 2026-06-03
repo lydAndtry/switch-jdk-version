@@ -9,3 +9,4 @@ dist/
 /.idea/
 /openspec/
 /.npmrc
+/DEPLOY.md
