@@ -3,8 +3,22 @@
 # JDK 路径一键切换脚本 (macOS / Linux)
 # 支持：扫描已安装JDK、手动输入路径、自动更新 JAVA_HOME 和 PATH
 # 支持：本地缓存自定义扫描根目录
-# 版本：v1.4
 # ============================================================
+
+# 自动检测版本号（从 package.json 读取，兼容 npm 全局安装和开发环境）
+_detect_version() {
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local pkg
+    for pkg in "$script_dir/../package.json" "$script_dir/package.json"; do
+        if [ -f "$pkg" ]; then
+            node -p "require('$pkg').version" 2>/dev/null && return
+            sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$pkg" 2>/dev/null && return
+        fi
+    done
+    echo "unknown"
+}
+VERSION=$(_detect_version)
 
 # 缓存目录：统一存放于 ~/.config/switch-jdk/
 CACHE_DIR="$HOME/.config/switch-jdk"
@@ -370,7 +384,7 @@ show_manage_roots_menu() {
 start_switch_jdk() {
     clear
     separator
-    log_title "   JDK 路径切换工具  v1.4  [$OS]"
+    log_title "   JDK 路径切换工具  v${VERSION}  [$OS]"
     separator
 
     separator
@@ -514,7 +528,7 @@ main_menu() {
     while true; do
         clear
         separator
-        log_title "   JDK 路径切换工具  v1.3  [$OS]"
+        log_title "   JDK 路径切换工具  v${VERSION}  [$OS]"
         separator
         echo ""
 

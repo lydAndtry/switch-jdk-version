@@ -16,6 +16,21 @@ $script:DefaultRoots = @(
     "$env:USERPROFILE\.jdks"
 )
 
+# 自动检测版本号（从 package.json 读取，兼容 npm 全局安装和开发环境）
+function Get-ScriptVersion {
+    $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+    @(
+        (Join-Path $scriptDir "..\package.json"),
+        (Join-Path $scriptDir "package.json")
+    ) | ForEach-Object {
+        if (Test-Path $_) {
+            try { return (Get-Content $_ -Raw | ConvertFrom-Json).version } catch {}
+        }
+    }
+    return "unknown"
+}
+$script:Version = Get-ScriptVersion
+
 # ════ 工具函数 ════════════════════════════════════════════════
 
 function Write-Log {
@@ -313,7 +328,7 @@ function Show-ManageRootsMenu {
 function Start-SwitchJdk {
     Clear-Host
     Write-Separator
-    Write-Log "   JDK 路径切换工具  v1.4" "TITLE"
+    Write-Log "   JDK 路径切换工具  v$script:Version" "TITLE"
     Write-Separator
 
     if (-not (Test-Admin)) {
@@ -461,7 +476,7 @@ function Start-SwitchJdk {
 while ($true) {
     Clear-Host
     Write-Separator
-    Write-Log "   JDK 路径切换工具  v1.3" "TITLE"
+    Write-Log "   JDK 路径切换工具  v$script:Version" "TITLE"
     Write-Separator
     Write-Host ""
 

@@ -71,7 +71,18 @@ if (-not (Get-Module -ListAvailable -Name ps2exe)) {
 
 Import-Module ps2exe -ErrorAction Stop
 
-# 4. 构建编译参数
+# 4. 读取项目版本号
+Write-Step "读取项目版本号..."
+$PkgJsonPath = Join-Path $ScriptDir "package.json"
+if (-not (Test-Path $PkgJsonPath)) {
+    Write-Fail "找不到 package.json：$PkgJsonPath"
+    exit 1
+}
+$pkg = Get-Content $PkgJsonPath -Raw | ConvertFrom-Json
+$Version = $pkg.version
+Write-Ok "项目版本：$Version"
+
+# 5. 构建编译参数
 Write-Step "开始编译..."
 
 $buildArgs = @{
@@ -82,7 +93,7 @@ $buildArgs = @{
     title        = "JDK切换工具"
     description  = "一键扫描并切换系统 JDK 版本"
     product      = "switch-jdk"
-    version      = "1.2.0"
+    version      = $Version
 }
 
 if (Test-Path $IconFile) {
@@ -99,7 +110,7 @@ try {
     exit 1
 }
 
-# 5. 验证输出
+# 6. 验证输出
 Write-Step "验证输出文件..."
 if (Test-Path $OutFile) {
     $size = (Get-Item $OutFile).Length / 1KB

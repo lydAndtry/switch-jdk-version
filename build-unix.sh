@@ -17,7 +17,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_FILE="$SCRIPT_DIR/switch-jdk.sh"
 OUT_DIR="$SCRIPT_DIR/dist"
-VERSION="1.3"
+VERSION=$(node -p "require('./package.json').version" 2>/dev/null || sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' package.json)
 
 # 检测当前 OS
 case "$(uname -s)" in
