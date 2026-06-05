@@ -215,168 +215,100 @@ function Get-AllSearchRoots {
     return [string[]]$all
 }
 
-# ════ 菜单1：管理扫描根目录 ═══════════════════════════════════
-
-function Show-ManageRootsMenu {
-    while ($true) {
-        Clear-Host
-        Write-Separator
-        Write-Log "   管理扫描根目录" "TITLE"
-        Write-Separator
-
-        $cached = @(Read-CachedRoots)
-
-        Write-Host ""
-        Write-Host "  [内置默认路径]（只读）" -ForegroundColor DarkGray
-        foreach ($r in $script:DefaultRoots) {
-            Write-Host ("    $r") -ForegroundColor DarkGray
-        }
-
-        Write-Host ""
-        Write-Host "  [自定义缓存路径]  缓存文件：$script:CacheFile" -ForegroundColor White
-        if ($cached.Count -eq 0) {
-            Write-Host "    (暂无自定义路径)" -ForegroundColor DarkGray
-        } else {
-            for ($i = 0; $i -lt $cached.Count; $i++) {
-                $exists = if (Test-PathSafe $cached[$i]) { "" } else { " [路径不存在]" }
-                Write-Host ("    [{0}] {1}{2}" -f ($i + 1), $cached[$i], $exists) -ForegroundColor White
-            }
-        }
-
-        Write-Host ""
-        Write-Separator
-        Write-Host "  [A] 添加新路径" -ForegroundColor Green
-        Write-Host "  [D] 删除已有路径" -ForegroundColor Yellow
-        Write-Host "  [Q] 返回主菜单" -ForegroundColor Cyan
-        Write-Separator
-        Write-Host ""
-        $action = (Read-Host "请输入操作").Trim().ToUpper()
-
-        switch ($action) {
-            "A" {
-                Write-Host ""
-                Write-Host "请输入要添加的扫描根目录路径（如 F:\Java）。输入 Q 取消：" -ForegroundColor Yellow
-                while ($true) {
-                    $rawInput = (Read-Host ">>> ").Trim()
-                    if ($rawInput -eq "") {
-                        Write-Log "输入为空，已取消。" "WARN"
-                        break
-                    }
-                    if ($rawInput.Trim().ToUpper() -eq "Q") {
-                        Write-Log "已取消添加。" "INFO"
-                        break
-                    }
-
-                    $newPath = Normalize-Path $rawInput
-                    if ($newPath -eq "") {
-                        Write-Log "输入为空，已取消。" "WARN"
-                        break
-                    }
-                    if (($cached -contains $newPath) -or ($script:DefaultRoots -contains $newPath)) {
-                        Write-Log "该路径已存在，无需重复添加。" "WARN"
-                        break
-                    }
-                    if (-not (Test-PathSafe $newPath)) {
-                        Write-Log "路径不存在：$newPath，请重新输入。" "ERROR"
-                        continue
-                    }
-
-                    $newList = [System.Collections.Generic.List[string]]@($cached)
-                    $newList.Add($newPath)
-                    Save-CachedRoots -Roots $newList.ToArray()
-                    Write-Log "已添加：$newPath" "SUCCESS"
-                    break
-                }
-                Start-Sleep -Seconds 1
-            }
-            "D" {
-                if ($cached.Count -eq 0) {
-                    Write-Log "没有可删除的自定义路径。" "WARN"
-                    Start-Sleep -Seconds 1
-                } else {
-                    Write-Host ""
-                    Write-Host "请输入要删除的路径序号（如 1）：" -ForegroundColor Yellow
-                    $delInput = (Read-Host ">>> ").Trim()
-                    if ($delInput -match "^\d+$") {
-                        $delIdx = [int]$delInput - 1
-                        if ($delIdx -ge 0 -and $delIdx -lt $cached.Count) {
-                            $removed = $cached[$delIdx]
-                            $newList = [System.Collections.Generic.List[string]]@($cached)
-                            $newList.RemoveAt($delIdx)
-                            Save-CachedRoots -Roots $newList.ToArray()
-                            Write-Log "已删除：$removed" "SUCCESS"
-                        } else {
-                            Write-Log "序号无效。" "ERROR"
-                        }
-                    } else {
-                        Write-Log "输入无效，请输入数字序号。" "ERROR"
-                    }
-                    Start-Sleep -Seconds 1
-                }
-            }
-            "Q" { return }
-            default {
-                Write-Log "无效输入，请重新选择。" "ERROR"
-                Start-Sleep -Seconds 1
-            }
-        }
-    }
-}
-
-# ════ 菜单2：切换 JDK ═════════════════════════════════════════
-
-function Start-SwitchJdk {
-    Clear-Host
-    Write-Separator
-    Write-Log "   JDK 路径切换工具  v$script:Version" "TITLE"
-    Write-Separator
-
-    if (-not (Test-Admin)) {
-        Write-Log "未检测到管理员权限！修改系统 PATH 需要管理员身份运行。" "ERROR"
-        Write-Log "请关闭此窗口，右键脚本选择 [以管理员身份运行 PowerShell]。" "WARN"
-        Read-Host "按 Enter 返回"
-        return
-    }
-    Write-Log "已检测到管理员权限" "SUCCESS"
-
-    Write-Separator
-    Write-Log "当前系统 PATH 中的 Java 相关路径：" "INFO"
-    $currentJdkPaths = Get-CurrentJdkPaths
-    if ($currentJdkPaths.Count -eq 0) {
-        Write-Log "  (未找到任何 JDK/JRE 路径)" "WARN"
-    } else {
-        $currentJdkPaths | ForEach-Object { Write-Log "  -> $_" "INFO" }
-    }
-
-    Write-Separator
+# ════ CLI 命令：-list（列出所有 JDK 环境）═════════════════════
+function Invoke-ListCommand {
     $allRoots = Get-AllSearchRoots
-    Write-Log "正在扫描以下根目录（共 $($allRoots.Count) 个）..." "INFO"
-    foreach ($r in $allRoots) {
-        $flag = if (Test-PathSafe $r) { "Y" } else { "N" }
-        Write-Host ("    [$flag] $r") -ForegroundColor DarkGray
+    $jdkList = Find-JdkInstallations -SearchRoots $allRoots
+
+    Write-Host ""
+    Write-Log "当前 JAVA_HOME：$($env:JAVA_HOME)" "INFO"
+    Write-Host ""
+
+    if ($jdkList.Count -gt 0) {
+        Write-Log "扫描到 $($jdkList.Count) 个 JDK 环境：" "SUCCESS"
+        Write-Host ""
+        for ($i = 0; $i -lt $jdkList.Count; $i++) {
+            $marker = if ($jdkList[$i] -eq $env:JAVA_HOME) { "*" } else { " " }
+            Write-Host ("  $marker [{0}] {1}" -f ($i + 1), $jdkList[$i]) -ForegroundColor White
+        }
+        Write-Host ""
+        Write-Host "  (* 表示当前使用的 JDK)" -ForegroundColor DarkGray
+    } else {
+        Write-Log "未扫描到 JDK 环境。" "WARN"
+        Write-Host ""
+        Write-Host "  请使用 switch-jdk -set <路径> 添加扫描根目录。" -ForegroundColor Green
     }
     Write-Host ""
+}
+
+# ════ CLI 命令：-set <路径>（添加扫描根目录）═══════════════════
+function Invoke-SetCommand {
+    param([string]$NewPath)
+
+    if ([string]::IsNullOrWhiteSpace($NewPath)) {
+        Write-Log "缺少路径参数。用法：switch-jdk -set <路径>" "ERROR"
+        Write-Host ""
+        exit 1
+    }
+
+    $normalized = Normalize-Path $NewPath
+
+    if (-not (Test-PathSafe $normalized)) {
+        Write-Log "路径不存在：$normalized" "ERROR"
+        exit 1
+    }
+
+    $cached = @(Read-CachedRoots)
+
+    if ($cached -contains $normalized -or $script:DefaultRoots -contains $normalized) {
+        Write-Log "该路径已在缓存中，无需重复添加。" "WARN"
+        exit 0
+    }
+
+    $newList = [System.Collections.Generic.List[string]]@($cached)
+    $newList.Add($normalized)
+    Save-CachedRoots -Roots $newList.ToArray()
+    Write-Log "已添加扫描根目录：$normalized" "SUCCESS"
+}
+
+# ════ CLI 命令：-change（选择并切换 JDK）════════════════════════
+function Invoke-ChangeCommand {
+    if (-not (Test-Admin)) {
+        Write-Log "未检测到管理员权限！修改系统 PATH 需要管理员身份运行。" "ERROR"
+        Write-Log "请以管理员身份运行 PowerShell 后重试。" "WARN"
+        exit 1
+    }
+
+    $allRoots = Get-AllSearchRoots
+
+    Write-Host ""
+    Write-Log "正在扫描 JDK 环境..." "INFO"
 
     $jdkList = Find-JdkInstallations -SearchRoots $allRoots
 
-    if ($jdkList.Count -gt 0) {
-        Write-Log "扫描到以下 JDK 版本：" "SUCCESS"
-        for ($i = 0; $i -lt $jdkList.Count; $i++) {
-            Write-Host ("  [{0}] {1}" -f ($i + 1), $jdkList[$i]) -ForegroundColor White
-        }
-    } else {
-        Write-Log "未扫描到 JDK，请手动输入路径。" "WARN"
+    if ($jdkList.Count -eq 0) {
+        Write-Log "未扫描到 JDK 环境。" "WARN"
+        Write-Host ""
+        Write-Host "  请使用 switch-jdk -set <路径> 添加扫描根目录后重试。" -ForegroundColor Green
+        exit 1
     }
 
-    Write-Separator
     Write-Host ""
-    if ($jdkList.Count -gt 0) {
-        Write-Host "输入序号选择上方 JDK，或直接粘贴完整 JDK 根目录路径（输入 Q 返回）：" -ForegroundColor Yellow
-    } else {
-        Write-Host "请输入完整 JDK 根目录路径（例如 D:\ProgramFiles\Java\jdk1.8.0_131）（输入 Q 返回）：" -ForegroundColor Yellow
-    }
+    Write-Log "当前 JAVA_HOME：$($env:JAVA_HOME)" "INFO"
+    Write-Host ""
 
-    $selectedJdk = ""
+    Write-Log "扫描到以下 JDK 版本：" "SUCCESS"
+    Write-Host ""
+    for ($i = 0; $i -lt $jdkList.Count; $i++) {
+        $marker = if ($jdkList[$i] -eq $env:JAVA_HOME) { "*" } else { " " }
+        Write-Host ("  $marker [{0}] {1}" -f ($i + 1), $jdkList[$i]) -ForegroundColor White
+    }
+    Write-Host ""
+    Write-Host "  (* 表示当前使用的 JDK)" -ForegroundColor DarkGray
+    Write-Host ""
+
+    Write-Host "请输入要切换的 JDK 序号（输入 Q 取消）：" -ForegroundColor Yellow
+
     while ($true) {
         $userInput = (Read-Host ">>> ").Trim()
         if ($userInput -eq "") {
@@ -384,122 +316,106 @@ function Start-SwitchJdk {
             continue
         }
         if ($userInput.ToUpper() -eq "Q") {
-            return
+            Write-Log "已取消。" "INFO"
+            exit 0
         }
 
         if ($userInput -match "^\d+$") {
             $idx = [int]$userInput - 1
             if ($idx -ge 0 -and $idx -lt $jdkList.Count) {
-                $selectedJdk = $jdkList[$idx]
-                Write-Log "已选择：$selectedJdk" "INFO"
+                $selected = $jdkList[$idx]
+
+                if (-not (Test-PathSafe $selected)) {
+                    Write-Log "路径不存在：$selected" "ERROR"
+                    exit 1
+                }
+
+                $javaBin = Join-Path $selected "bin\java.exe"
+                if (-not (Test-Path -LiteralPath $javaBin)) {
+                    Write-Log "bin\java.exe 不存在，请确认选择的是 JDK 根目录。" "ERROR"
+                    exit 1
+                }
+
+                Write-Host ""
+                Write-Separator
+                Write-Log "正在切换 JDK 到：$selected" "INFO"
+
+                $newBinPath = Update-SystemJdkPath -NewJdkRoot $selected
+
+                $oldJavaHome = [Environment]::GetEnvironmentVariable("JAVA_HOME", "Machine")
+                [Environment]::SetEnvironmentVariable("JAVA_HOME", $selected, "Machine")
+                $env:JAVA_HOME = $selected
+                Write-Log "JAVA_HOME 已设置为：$selected" "SUCCESS"
+
+                Write-Host ""
+                Write-Separator
+                Write-Log "正在验证 java -version..." "INFO"
+                Write-Host ""
+                try {
+                    $javaExe = Join-Path $selected "bin\java.exe"
+                    & $javaExe -version 2>&1 | ForEach-Object { Write-Host "  $_" -ForegroundColor White }
+                    Write-Host ""
+                    Write-Log "java -version 执行成功！" "SUCCESS"
+                } catch {
+                    Write-Log "执行 java -version 时出错：$_" "ERROR"
+                }
+
+                Write-Separator
+                Write-Log "JDK 切换完成！新开命令窗口将自动生效。" "SUCCESS"
+                Write-Log "当前窗口已立即生效，无需重启。" "INFO"
+                exit 0
             } else {
                 Write-Log "序号无效，请重新输入。" "ERROR"
-                continue
             }
         } else {
-            $selectedJdk = Normalize-Path $userInput
-            Write-Log "手动输入路径：$selectedJdk" "INFO"
+            Write-Log "请输入数字序号。" "ERROR"
         }
-
-        Write-Separator
-        Write-Log "正在校验 JDK 路径..." "INFO"
-
-        if (-not (Test-PathSafe $selectedJdk)) {
-            Write-Log "路径不存在：$selectedJdk，请重新输入。" "ERROR"
-            continue
-        }
-        Write-Log "目录存在：$selectedJdk" "SUCCESS"
-
-        $javaBin = Join-Path $selectedJdk "bin\java.exe"
-        if (-not (Test-Path -LiteralPath $javaBin)) {
-            Write-Log "bin\java.exe 不存在，请确认输入的是 JDK 根目录（不是 bin）。" "ERROR"
-            continue
-        }
-        Write-Log "java.exe 存在：$javaBin" "SUCCESS"
-
-        $javacBin = Join-Path $selectedJdk "bin\javac.exe"
-        if (Test-Path -LiteralPath $javacBin) {
-            Write-Log "javac.exe 存在，确认为完整 JDK。" "SUCCESS"
-        } else {
-            Write-Log "未找到 javac.exe，可能是 JRE，继续设置..." "WARN"
-        }
-
-        break
     }
-
-    Write-Separator
-    Write-Log "正在更新系统 PATH..." "INFO"
-    $newBinPath = Update-SystemJdkPath -NewJdkRoot $selectedJdk
-
-    Write-Log "正在设置 JAVA_HOME..." "INFO"
-    $oldJavaHome = [Environment]::GetEnvironmentVariable("JAVA_HOME", "Machine")
-    if ($oldJavaHome) {
-        Write-Log "原 JAVA_HOME：$oldJavaHome" "WARN"
-    }
-    [Environment]::SetEnvironmentVariable("JAVA_HOME", $selectedJdk, "Machine")
-    $env:JAVA_HOME = $selectedJdk
-    Write-Log "JAVA_HOME 已设置为：$selectedJdk" "SUCCESS"
-
-    Write-Separator
-    Write-Log "正在验证，执行 java -version..." "INFO"
-    Write-Host ""
-    try {
-        $javaExe = Join-Path $selectedJdk "bin\java.exe"
-        $output  = & $javaExe -version 2>&1
-        $output | ForEach-Object { Write-Host "  $_" -ForegroundColor White }
-        Write-Host ""
-        Write-Log "java -version 执行成功！" "SUCCESS"
-    } catch {
-        Write-Log "执行 java -version 时出错：$_" "ERROR"
-    }
-
-    Write-Separator
-    Write-Log "更新后系统 PATH 中的 Java 相关路径：" "INFO"
-    $updatedPaths = [Environment]::GetEnvironmentVariable("Path", "Machine") -split ";" |
-        Where-Object { $_ -imatch 'jdk|jre' -and $_ -ne "" }
-    if ($updatedPaths.Count -eq 0) {
-        Write-Log "  (未找到 Java 路径，请检查)" "WARN"
-    } else {
-        $updatedPaths | ForEach-Object { Write-Log "  -> $_" "SUCCESS" }
-    }
-
-    Write-Separator
-    Write-Log "JDK 切换完成！新开命令窗口将自动生效。" "SUCCESS"
-    Write-Log "当前窗口已立即生效，无需重启。" "INFO"
-    Write-Separator
-    Write-Host ""
-    Read-Host "按 Enter 返回主菜单"
 }
 
-# ════ 主菜单 ══════════════════════════════════════════════════
+# ════ 帮助信息 ══════════════════════════════════════════════════
+function Show-Help {
+    Write-Host ""
+    Write-Host "  switch-jdk v$script:Version — JDK 版本一键切换工具" -ForegroundColor Magenta
+    Write-Host ""
+    Write-Host "  用法:" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "    switch-jdk -v                查看版本号"
+    Write-Host "    switch-jdk -list             列出所有扫描到的 JDK 环境"
+    Write-Host "    switch-jdk -set <路径>       添加自定义扫描根目录"
+    Write-Host "    switch-jdk -change           列出所有 JDK 版本并选择切换"
+    Write-Host ""
+    Write-Host "  缓存文件：$script:CacheFile" -ForegroundColor DarkGray
+    Write-Host ""
+}
 
-while ($true) {
-    Clear-Host
-    Write-Separator
-    Write-Log "   JDK 路径切换工具  v$script:Version" "TITLE"
-    Write-Separator
-    Write-Host ""
+# ════ CLI 参数分发 ══════════════════════════════════════════════
+$Command = if ($args.Count -gt 0) { $args[0] } else { "" }
+$Value   = if ($args.Count -gt 1) { $args[1] } else { "" }
 
-    $cached = @(Read-CachedRoots)
-    $totalRoots = $script:DefaultRoots.Count + $cached.Count
-    Write-Host ("  扫描根目录：内置 {0} 个 + 自定义 {1} 个 = 共 {2} 个" -f `
-        $script:DefaultRoots.Count, $cached.Count, $totalRoots) -ForegroundColor DarkGray
-    Write-Host ""
-    Write-Host "  [1] 管理扫描根目录（添加 / 删除自定义路径）" -ForegroundColor Green
-    Write-Host "  [2] 切换 JDK 版本" -ForegroundColor Cyan
-    Write-Host "  [Q] 退出" -ForegroundColor DarkGray
-    Write-Host ""
-    Write-Separator
-    Write-Host ""
-    $choice = (Read-Host "请选择操作").Trim().ToUpper()
-
-    switch ($choice) {
-        "1" { Show-ManageRootsMenu }
-        "2" { Start-SwitchJdk }
-        "Q" { exit 0 }
-        default {
-            Write-Log "无效输入，请输入 1、2 或 Q。" "ERROR"
-            Start-Sleep -Seconds 1
-        }
+switch ($Command) {
+    "-v" {
+        Write-Host "v$script:Version"
+    }
+    "--version" {
+        Write-Host "v$script:Version"
+    }
+    "-list" {
+        Invoke-ListCommand
+    }
+    "-set" {
+        Invoke-SetCommand -NewPath $Value
+    }
+    "-change" {
+        Invoke-ChangeCommand
+    }
+    "" {
+        Show-Help
+    }
+    default {
+        Write-Host "未知参数: $Command"
+        Write-Host ""
+        Show-Help
+        exit 1
     }
 }

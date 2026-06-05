@@ -11,14 +11,24 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 
-// 解析当前脚本的真实路径（处理 npm 全局安装的符号链接）
 const cliDir = path.dirname(fs.realpathSync(__filename));
-const scriptsDir = path.join(cliDir, '..', 'scripts');
+const projectRoot = path.join(cliDir, '..');
+const scriptsDir = path.join(projectRoot, 'scripts');
 
-const platform = os.platform(); // 'win32' | 'darwin' | 'linux'
+const platform = os.platform();
+
+// 解析用户参数
+const userArgs = process.argv.slice(2);
+
+// -v / --version 直接由 Node.js 处理
+if (userArgs.length === 1 && (userArgs[0] === '-v' || userArgs[0] === '--version')) {
+    const pkg = require(path.join(projectRoot, 'package.json'));
+    console.log(`v${pkg.version}`);
+    process.exit(0);
+}
 
 let command;
-let args;
+let scriptArgs;
 let scriptName;
 
 if (platform === 'win32') {
@@ -31,9 +41,11 @@ if (platform === 'win32') {
     }
 
     command = 'powershell.exe';
-    args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath];
+    // 使用 -Command 方式传递参数，避免 -File 模式下 -list 等被当作参数名解析
+    const escapedPath = scriptPath.replace(/'/g, "''");
+    const extraArgs = userArgs.map(a => `'${a.replace(/'/g, "''")}'`).join(' ');
+    scriptArgs = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `& '${escapedPath}' ${extraArgs}`];
 } else {
-    // macOS (darwin) 或 Linux
     scriptName = 'switch-jdk.sh';
     const scriptPath = path.join(scriptsDir, scriptName);
 
@@ -43,11 +55,10 @@ if (platform === 'win32') {
     }
 
     command = 'bash';
-    args = [scriptPath];
+    scriptArgs = [scriptPath, ...userArgs];
 }
 
-// 透传执行：stdio 完全继承，保留交互式菜单和彩色输出
-const child = spawn(command, args, {
+const child = spawn(command, scriptArgs, {
     stdio: 'inherit',
     shell: false,
 });

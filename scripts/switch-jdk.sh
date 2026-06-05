@@ -273,149 +273,18 @@ export PATH=\"\$JAVA_HOME/bin:\$PATH\"
     echo "$new_bin"
 }
 
-# ════ 菜单1：管理扫描根目录 ══════════════════════════════════
-show_manage_roots_menu() {
-    while true; do
-        clear
-        separator
-        log_title "   管理扫描根目录"
-        separator
-
-        local -a cached=()
-        while IFS= read -r line; do
-            [ -n "$line" ] && cached+=("$line")
-        done < <(read_cached_roots)
-
-        echo ""
-        echo -e "${GRAY}  [内置默认路径]（只读）${NC}"
-        while IFS= read -r r; do
-            echo -e "${GRAY}    $r${NC}"
-        done < <(get_default_roots)
-
-        echo ""
-        echo -e "  [自定义缓存路径]  缓存文件：${GRAY}$CACHE_FILE${NC}"
-        if [ ${#cached[@]} -eq 0 ]; then
-            echo -e "${GRAY}    (暂无自定义路径)${NC}"
-        else
-            for i in "${!cached[@]}"; do
-                local exists_flag=""
-                test_path_safe "${cached[$i]}" || exists_flag=" ${RED}[路径不存在]${NC}"
-                echo -e "    [$((i+1))] ${cached[$i]}${exists_flag}"
-            done
-        fi
-
-        echo ""
-        separator
-        echo -e "  ${GREEN}[A] 添加新路径${NC}"
-        echo -e "  ${YELLOW}[D] 删除已有路径${NC}"
-        echo -e "  ${CYAN}[Q] 返回主菜单${NC}"
-        separator
-        echo ""
-        read -rp "请输入操作: " action
-        action=$(echo "$action" | tr '[:lower:]' '[:upper:]')
-
-        case "$action" in
-            A)
-                echo ""
-                echo -e "${YELLOW}请输入要添加的扫描根目录路径（如 /opt/java）。输入 Q 取消：${NC}"
-                while true; do
-                    read -rp ">>> " new_path
-                    new_path=$(normalize_path "$new_path")
-
-                    if [ -z "$new_path" ]; then
-                        log_warn "输入为空，已取消。"
-                        break
-                    fi
-                    if [ "$(echo "$new_path" | tr '[:lower:]' '[:upper:]')" = "Q" ]; then
-                        log_info "已取消添加。"
-                        break
-                    fi
-                    if printf '%s\n' "${cached[@]}" | grep -qx "$new_path"; then
-                        log_warn "该路径已存在，无需重复添加。"
-                        break
-                    fi
-                    if ! test_path_safe "$new_path"; then
-                        log_error "路径不存在：$new_path，请重新输入。"
-                        continue
-                    fi
-
-                    cached+=("$new_path")
-                    save_cached_roots "${cached[@]}"
-                    log_success "已添加：$new_path"
-                    break
-                done
-                sleep 1
-                ;;
-            D)
-                if [ ${#cached[@]} -eq 0 ]; then
-                    log_warn "没有可删除的自定义路径。"
-                    sleep 1
-                else
-                    echo ""
-                    echo -e "${YELLOW}请输入要删除的路径序号（如 1）：${NC}"
-                    read -rp ">>> " del_input
-                    if [[ "$del_input" =~ ^[0-9]+$ ]]; then
-                        local del_idx=$((del_input - 1))
-                        if [ "$del_idx" -ge 0 ] && [ "$del_idx" -lt ${#cached[@]} ]; then
-                            local removed="${cached[$del_idx]}"
-                            unset 'cached[$del_idx]'
-                            cached=("${cached[@]}")
-                            save_cached_roots "${cached[@]}"
-                            log_success "已删除：$removed"
-                        else
-                            log_error "序号无效。"
-                        fi
-                    else
-                        log_error "输入无效，请输入数字序号。"
-                    fi
-                    sleep 1
-                fi
-                ;;
-            Q) return ;;
-            *)
-                log_error "无效输入，请重新选择。"
-                sleep 1
-                ;;
-        esac
-    done
-}
-
-# ════ 菜单2：切换 JDK ════════════════════════════════════════
-start_switch_jdk() {
-    clear
-    separator
-    log_title "   JDK 路径切换工具  v${VERSION}  [$OS]"
-    separator
-
-    separator
-    log_info "当前 JAVA_HOME：${JAVA_HOME:-(未设置)}"
-    if command -v java &>/dev/null; then
-        log_info "当前 java 版本："
-        java -version 2>&1 | while IFS= read -r line; do echo "    $line"; done
-    else
-        log_warn "(当前未配置 java 命令)"
-    fi
-
-    separator
+# ════ CLI 命令：-list（列出所有 JDK 环境）═════════════════════
+cmd_list() {
     local -a all_roots=()
     while IFS= read -r line; do
         [ -n "$line" ] && all_roots+=("$line")
     done < <(get_all_search_roots)
-
-    log_info "正在扫描以下根目录（共 ${#all_roots[@]} 个）..."
-    for r in "${all_roots[@]}"; do
-        local flag="N"
-        [ -d "$r" ] && flag="Y"
-        echo -e "${GRAY}    [$flag] $r${NC}"
-    done
-    echo ""
 
     local -a jdk_list=()
     while IFS= read -r line; do
         [ -n "$line" ] && jdk_list+=("$line")
     done < <(find_jdk_installations "${all_roots[@]}")
 
-    # macOS：借助系统 java_home 工具补充（去重）
     if [ "$OS" = "mac" ]; then
         while IFS= read -r line; do
             [ -n "$line" ] || continue
@@ -427,24 +296,110 @@ start_switch_jdk() {
         done < <(_macos_java_home_list)
     fi
 
-    if [ ${#jdk_list[@]} -gt 0 ]; then
-        log_success "扫描到以下 JDK 版本："
-        for i in "${!jdk_list[@]}"; do
-            echo -e "  [${CYAN}$((i+1))${NC}] ${jdk_list[$i]}"
-        done
-    else
-        log_warn "未扫描到 JDK，请手动输入路径。"
-    fi
-
-    separator
     echo ""
+    log_info "当前 JAVA_HOME：${JAVA_HOME:-(未设置)}"
+    echo ""
+
     if [ ${#jdk_list[@]} -gt 0 ]; then
-        echo -e "${YELLOW}输入序号选择上方 JDK，或直接粘贴完整 JDK 根目录路径（输入 Q 返回）：${NC}"
+        log_success "扫描到 ${#jdk_list[@]} 个 JDK 环境："
+        echo ""
+        for i in "${!jdk_list[@]}"; do
+            local marker=" "
+            [ "${jdk_list[$i]}" = "$JAVA_HOME" ] && marker="*"
+            echo -e "  ${marker} [${CYAN}$((i+1))${NC}] ${jdk_list[$i]}"
+        done
+        echo ""
+        echo -e "  ${GRAY}(* 表示当前使用的 JDK)${NC}"
     else
-        echo -e "${YELLOW}请输入完整 JDK 根目录路径（例如 /usr/lib/jvm/java-17-openjdk-amd64）（输入 Q 返回）：${NC}"
+        log_warn "未扫描到 JDK 环境。"
+        echo ""
+        echo -e "  请使用 ${GREEN}switch-jdk -set <路径>${NC} 添加扫描根目录。"
+    fi
+    echo ""
+}
+
+# ════ CLI 命令：-set <路径>（添加扫描根目录）═══════════════════
+cmd_set() {
+    local new_path="$1"
+
+    if [ -z "$new_path" ]; then
+        log_error "缺少路径参数。用法：switch-jdk -set <路径>"
+        echo ""
+        exit 1
     fi
 
-    local selected_jdk=""
+    new_path=$(normalize_path "$new_path")
+
+    if ! test_path_safe "$new_path"; then
+        log_error "路径不存在：$new_path"
+        exit 1
+    fi
+
+    local -a cached=()
+    while IFS= read -r line; do
+        [ -n "$line" ] && cached+=("$line")
+    done < <(read_cached_roots)
+
+    if printf '%s\n' "${cached[@]}" | grep -qx "$new_path"; then
+        log_warn "该路径已在缓存中，无需重复添加。"
+        exit 0
+    fi
+
+    cached+=("$new_path")
+    save_cached_roots "${cached[@]}"
+    log_success "已添加扫描根目录：$new_path"
+}
+
+# ════ CLI 命令：-change（选择并切换 JDK）════════════════════════
+cmd_change() {
+    local -a all_roots=()
+    while IFS= read -r line; do
+        [ -n "$line" ] && all_roots+=("$line")
+    done < <(get_all_search_roots)
+
+    echo ""
+    log_info "正在扫描 JDK 环境..."
+
+    local -a jdk_list=()
+    while IFS= read -r line; do
+        [ -n "$line" ] && jdk_list+=("$line")
+    done < <(find_jdk_installations "${all_roots[@]}")
+
+    if [ "$OS" = "mac" ]; then
+        while IFS= read -r line; do
+            [ -n "$line" ] || continue
+            local dup=0
+            for existing in "${jdk_list[@]}"; do
+                [ "$existing" = "$line" ] && dup=1 && break
+            done
+            [ $dup -eq 0 ] && jdk_list+=("$line")
+        done < <(_macos_java_home_list)
+    fi
+
+    if [ ${#jdk_list[@]} -eq 0 ]; then
+        log_warn "未扫描到 JDK 环境。"
+        echo ""
+        echo -e "  请使用 ${GREEN}switch-jdk -set <路径>${NC} 添加扫描根目录后重试。"
+        exit 1
+    fi
+
+    echo ""
+    log_info "当前 JAVA_HOME：${JAVA_HOME:-(未设置)}"
+    echo ""
+
+    log_success "扫描到以下 JDK 版本："
+    echo ""
+    for i in "${!jdk_list[@]}"; do
+        local marker=" "
+        [ "${jdk_list[$i]}" = "$JAVA_HOME" ] && marker="*"
+        echo -e "  ${marker} [${CYAN}$((i+1))${NC}] ${jdk_list[$i]}"
+    done
+    echo ""
+    echo -e "  ${GRAY}(* 表示当前使用的 JDK)${NC}"
+    echo ""
+
+    echo -e "${YELLOW}请输入要切换的 JDK 序号（输入 Q 取消）：${NC}"
+
     while true; do
         read -rp ">>> " user_input
         user_input="$(echo "$user_input" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
@@ -454,113 +409,89 @@ start_switch_jdk() {
             continue
         fi
         if [ "$(echo "$user_input" | tr '[:lower:]' '[:upper:]')" = "Q" ]; then
-            return
+            log_info "已取消。"
+            exit 0
         fi
 
         if [[ "$user_input" =~ ^[0-9]+$ ]]; then
             local idx=$((user_input - 1))
             if [ "$idx" -ge 0 ] && [ "$idx" -lt ${#jdk_list[@]} ]; then
-                selected_jdk="${jdk_list[$idx]}"
-                log_info "已选择：$selected_jdk"
+                local selected="${jdk_list[$idx]}"
+
+                if [ ! -d "$selected" ]; then
+                    log_error "路径不存在：$selected"
+                    exit 1
+                fi
+                if [ ! -x "$selected/bin/java" ]; then
+                    log_error "bin/java 不存在，请确认选择的是 JDK 根目录。"
+                    exit 1
+                fi
+
+                echo ""
+                separator
+                log_info "正在切换 JDK 到：$selected"
+                update_system_jdk_path "$selected"
+
+                echo ""
+                separator
+                log_info "正在验证 java -version..."
+                echo ""
+                "$selected/bin/java" -version 2>&1
+                echo ""
+                log_success "JDK 切换完成！"
+
+                case "$(basename "${SHELL:-bash}")" in
+                    zsh)  log_info "如需手动刷新：source ~/.zshrc" ;;
+                    bash) log_info "如需手动刷新：source ~/.bashrc" ;;
+                    *)    log_info "如需手动刷新：source ~/.profile" ;;
+                esac
+                exit 0
             else
                 log_error "序号无效，请重新输入。"
-                continue
             fi
         else
-            selected_jdk="${user_input//\"/}"
-            selected_jdk="${selected_jdk#"${selected_jdk%%[![:space:]]*}"}"
-            selected_jdk="${selected_jdk%"${selected_jdk##*[![:space:]]}"}"
-            selected_jdk=$(normalize_path "$selected_jdk")
-            log_info "手动输入路径：$selected_jdk"
+            log_error "请输入数字序号。"
         fi
-
-        separator
-        log_info "正在校验 JDK 路径..."
-
-        if [ ! -d "$selected_jdk" ]; then
-            log_error "路径不存在：$selected_jdk，请重新输入。"
-            continue
-        fi
-        log_success "目录存在：$selected_jdk"
-
-        if [ ! -x "$selected_jdk/bin/java" ]; then
-            log_error "bin/java 不存在，请确认输入的是 JDK 根目录（不是 bin）。"
-            continue
-        fi
-        log_success "java 可执行文件存在：$selected_jdk/bin/java"
-
-        if [ -x "$selected_jdk/bin/javac" ]; then
-            log_success "javac 存在，确认为完整 JDK。"
-        else
-            log_warn "未找到 javac，可能是 JRE，继续设置..."
-        fi
-
-        break
-    done
-
-    separator
-    log_info "正在更新 JAVA_HOME 和系统 PATH..."
-    update_system_jdk_path "$selected_jdk"
-
-    separator
-    log_info "正在验证，执行 java -version..."
-    echo ""
-    "$selected_jdk/bin/java" -version 2>&1 | while IFS= read -r line; do echo "  $line"; done
-    echo ""
-    log_success "java -version 执行成功！"
-
-    separator
-    log_success "JDK 切换完成！"
-    log_info "新开终端将自动生效（已写入 Shell 配置文件）。"
-    log_info "当前终端立即生效，已完成 export 设置。"
-    case "$(basename "${SHELL:-bash}")" in
-        zsh)  log_info "如需手动刷新：source ~/.zshrc" ;;
-        bash) log_info "如需手动刷新：source ~/.bashrc" ;;
-        *)    log_info "如需手动刷新：source ~/.profile" ;;
-    esac
-    separator
-    echo ""
-    read -rp "按 Enter 返回主菜单"
-}
-
-# ════ 主菜单 ══════════════════════════════════════════════════
-main_menu() {
-    while true; do
-        clear
-        separator
-        log_title "   JDK 路径切换工具  v${VERSION}  [$OS]"
-        separator
-        echo ""
-
-        local cached_count=0
-        while IFS= read -r line; do
-            [ -n "$line" ] && ((cached_count++))
-        done < <(read_cached_roots)
-
-        local default_count
-        default_count=$(get_default_roots | wc -l | tr -d ' ')
-
-        echo -e "${GRAY}  扫描根目录：内置 $default_count 个 + 自定义 $cached_count 个 = 共 $((default_count + cached_count)) 个${NC}"
-        echo ""
-        echo -e "  ${GREEN}[1] 管理扫描根目录（添加 / 删除自定义路径）${NC}"
-        echo -e "  ${CYAN}[2] 切换 JDK 版本${NC}"
-        echo -e "  ${GRAY}[Q] 退出${NC}"
-        echo ""
-        separator
-        echo ""
-        read -rp "请选择操作: " choice
-        choice=$(echo "$choice" | tr '[:lower:]' '[:upper:]')
-
-        case "$choice" in
-            1) show_manage_roots_menu ;;
-            2) start_switch_jdk ;;
-            Q) exit 0 ;;
-            *)
-                log_error "无效输入，请输入 1、2 或 Q。"
-                sleep 1
-                ;;
-        esac
     done
 }
 
-main_menu
+# ════ 帮助信息 ══════════════════════════════════════════════════
+show_help() {
+    echo ""
+    echo -e "  ${MAGENTA}switch-jdk${NC} v${VERSION} — JDK 版本一键切换工具  [${OS}]"
+    echo ""
+    echo -e "  ${GREEN}用法:${NC}"
+    echo ""
+    echo -e "    switch-jdk -v                查看版本号"
+    echo -e "    switch-jdk -list             列出所有扫描到的 JDK 环境"
+    echo -e "    switch-jdk -set <路径>       添加自定义扫描根目录"
+    echo -e "    switch-jdk -change           列出所有 JDK 版本并选择切换"
+    echo ""
+    echo -e "  ${GRAY}缓存文件：$CACHE_FILE${NC}"
+    echo ""
+}
+
+# ════ CLI 参数分发 ══════════════════════════════════════════════
+case "${1:-}" in
+    -v|--version)
+        echo "v${VERSION}"
+        ;;
+    -list)
+        cmd_list
+        ;;
+    -set)
+        cmd_set "${2:-}"
+        ;;
+    -change)
+        cmd_change
+        ;;
+    "")
+        show_help
+        ;;
+    *)
+        echo "未知参数: $1"
+        echo ""
+        show_help
+        exit 1
+        ;;
+esac

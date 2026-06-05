@@ -15,7 +15,7 @@ $ScriptDir = if ($PSScriptRoot -and $PSScriptRoot -ne "") {
     "C:\switch-jdk"
 }
 
-$SrcFile  = Join-Path $ScriptDir "switch-jdk.ps1"
+$SrcFile  = Join-Path $ScriptDir "scripts\switch-jdk.ps1"
 $OutDir   = Join-Path $ScriptDir "dist"
 $OutFile  = Join-Path $OutDir "switch-jdk.exe"
 $IconFile = Join-Path $ScriptDir "icon.ico"

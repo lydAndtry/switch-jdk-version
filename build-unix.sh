@@ -15,7 +15,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC_FILE="$SCRIPT_DIR/switch-jdk.sh"
+SRC_FILE="$SCRIPT_DIR/scripts/switch-jdk.sh"
 OUT_DIR="$SCRIPT_DIR/dist"
 VERSION=$(node -p "require('./package.json').version" 2>/dev/null || sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' package.json)
 
